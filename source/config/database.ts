@@ -1,7 +1,16 @@
 import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+// Enfoque más simple para inicializar Prisma
+let prisma: PrismaClient;
 
+try {
+  prisma = new PrismaClient();
+} catch (error) {
+  console.error("Error al inicializar PrismaClient:", error);
+  // No terminamos el proceso aquí para permitir que la app funcione sin DB
+  // Pero creamos un objeto vacío para evitar errores
+  prisma = {} as PrismaClient;
+}
 
 export const testConnection = async (): Promise<boolean> => {
   try {

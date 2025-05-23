@@ -17,9 +17,8 @@ export const analyzeReceiptImage = async (imagePath: string): Promise<ProductoRe
     // Por ahora, simulamos la detección de productos
     // Buscar en la base de datos productos que podrían coincidir
     const categorias = await prisma.categorias.findMany();
-    
-    // Crear productos simulados basados en las categorías existentes
-    const productosDetectados: ProductoRecibo[] = categorias.slice(0, 3).map(categoria => ({
+      // Crear productos simulados basados en las categorías existentes
+    const productosDetectados: ProductoRecibo[] = categorias.slice(0, 3).map((categoria: any) => ({
       id: 0, // El ID se generará al guardar en la base de datos
       nombre_detectado: `Producto de ${categoria.categoria}`,
       productos: `Ejemplo de ${categoria.categoria}`,
@@ -233,14 +232,12 @@ export const getImpactoUsuario = async (usuarioId: string) => {
         fecha_recibo: 'desc'
       }
     });
-    
-    // Calcular CO2 acumulado
-    const co2Acumulado = recibos.reduce((total, recibo) => {
+      // Calcular CO2 acumulado
+    const co2Acumulado = recibos.reduce((total: number, recibo: any) => {
       return total + (recibo.co2e_total || 0);
     }, 0);
-    
-    // Obtener cantidad de recibos verdes
-    const recibosVerdes = recibos.filter(recibo => recibo.es_recibo_verde).length;
+      // Obtener cantidad de recibos verdes
+    const recibosVerdes = recibos.filter((recibo: any) => recibo.es_recibo_verde).length;
     
     // Obtener el último recibo
     const ultimoRecibo = recibos.length > 0 ? recibos[0] : null;

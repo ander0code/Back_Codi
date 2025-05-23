@@ -4,7 +4,59 @@ import { v4 as uuidv4 } from 'uuid';
 import * as receiptService from '../services/receiptService.js';
 
 /**
- * Obtener el último recibo del usuario
+ * @swagger
+ * tags:
+ *   name: Recibos
+ *   description: Gestión de recibos
+ */
+
+/**
+ * @swagger
+ * /api/receipts/latest:
+ *   get:
+ *     summary: Obtener el último recibo del usuario
+ *     description: Devuelve la información del último recibo procesado por el usuario
+ *     tags: [Recibos]
+ *     parameters:
+ *       - in: header
+ *         name: x-user-id
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: ID del usuario
+ *     responses:
+ *       200:
+ *         description: Información del último recibo
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: string
+ *                 establecimiento:
+ *                   type: string
+ *                 logo_id:
+ *                   type: string
+ *                 fecha:
+ *                   type: string
+ *                   format: date
+ *                 monto_total:
+ *                   type: number
+ *                 co2_generado:
+ *                   type: number
+ *       404:
+ *         description: No se encontraron recibos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Error del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const getLatestReceipt = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -156,7 +208,71 @@ export const getReceiptDetails = async (req: Request, res: Response): Promise<vo
 };
 
 /**
- * Procesar una imagen de recibo (OCR + análisis)
+ * @swagger
+ * /api/receipts/process:
+ *   post:
+ *     summary: Procesar imagen de recibo
+ *     description: Analiza una imagen de recibo usando OCR y devuelve los productos detectados
+ *     tags: [Recibos]
+ *     security:
+ *       - userIdHeader: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               receipt:
+ *                 type: string
+ *                 format: binary
+ *                 description: Imagen del recibo (JPEG, PNG, PDF)
+ *     responses:
+ *       200:
+ *         description: Recibo analizado correctamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: string
+ *                   description: ID del recibo generado
+ *                 establecimiento:
+ *                   type: string
+ *                 fecha:
+ *                   type: string
+ *                   format: date
+ *                 monto_total:
+ *                   type: number
+ *                 co2_generado:
+ *                   type: number
+ *                 nivel_impacto:
+ *                   type: string
+ *                   enum: [verde, amarillo, rojo]
+ *                 productos_eco:
+ *                   type: number
+ *                 productos:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       nombre:
+ *                         type: string
+ *                       co2:
+ *                         type: number
+ *       400:
+ *         description: Error en la solicitud
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Error del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export const processReceiptImage = async (req: Request, res: Response): Promise<void> => {
   try {

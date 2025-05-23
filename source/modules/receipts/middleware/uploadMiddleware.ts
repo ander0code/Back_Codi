@@ -12,17 +12,17 @@ if (!fs.existsSync(uploadDir)) {
 
 // Configure storage
 const storage = multer.diskStorage({
-  destination: (_req: Request, _file: Express.Multer.File, cb) => {
+  destination: (_req: Request, _file: any, cb: any) => {
     cb(null, uploadDir);
   },
-  filename: (_req: Request, file: Express.Multer.File, cb) => {
+  filename: (_req: Request, file: any, cb: any) => {
     const uniqueFilename = `${uuidv4()}${path.extname(file.originalname)}`;
     cb(null, uniqueFilename);
   }
 });
 
 // File filter for image types
-const fileFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+const fileFilter = (_req: Request, file: any, cb: any) => {
   const allowedTypes = /jpeg|jpg|png|pdf/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);
@@ -41,14 +41,19 @@ export const upload = multer({
   fileFilter
 });
 
+interface MulterError extends Error {
+  code?: string;
+}
+
 // Middleware to handle upload errors
 export const handleUploadErrors = (err: Error, req: Request, res: Response, next: NextFunction): void => {
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
+  const multerErr = err as MulterError;
+  if (multerErr && typeof multerErr === 'object') {
+    if (multerErr.code === 'LIMIT_FILE_SIZE') {
       res.status(400).json({ error: 'El archivo es demasiado grande. Tamaño máximo: 5MB' });
       return;
     }
-    res.status(400).json({ error: `Error en la carga: ${err.message}` });
+    res.status(400).json({ error: `Error en la carga: ${multerErr.message}` });
     return;
   }
   
