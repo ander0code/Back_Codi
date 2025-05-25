@@ -1,8 +1,16 @@
-import { Router } from 'express';
 import type { Router as IRouter } from 'express';
+import { Router } from 'express';
 import * as receiptsController from '../controllers/receiptsController.js';
+import { authenticateJWT } from '../../../middleware/authMiddleware.js';
+
+// Crear el router
 
 const router: IRouter = Router();
+
+// Middleware para todas las rutas
+router.use(function(req, res, next) {
+  authenticateJWT(req, res, next);
+});
 
 /**
  * @swagger

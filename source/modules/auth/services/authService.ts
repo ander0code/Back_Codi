@@ -3,20 +3,42 @@ import bcryptjs from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../../../config/database.js';
 import { JWT_SECRET, getSignOptions } from '../../../config/jwt.js';
-import { LoginDto, RegisterDto, TokenPayload, AuthUser } from '../interfaces/auth.interfaces.js';
+
+// Tipos para TypeScript
+interface UserData {
+  name: string;
+  email: string;
+  password: string;
+}
+
+interface LoginData {
+  email: string;
+  password: string;
+}
+
+interface UserResponse {
+  id: string;
+  nombre: string;
+  correo: string;
+}
+
+interface AuthResponse {
+  user: UserResponse;
+  token: string;
+}
 
 /**
  * Registra un nuevo usuario en el sistema
  * @param userData Datos del usuario a registrar
- * @returns Usuario creado sin incluir contraseña
+ * @returns Usuario creado con token JWT
  */
-export const register = async (userData: RegisterDto): Promise<AuthUser> => {
+export const register = async (userData: UserData): Promise<AuthResponse> => {
   try {
     // Verificar si el correo ya está registrado
     const existingUser = await prisma.usuarios.findFirst({
       where: {
         correo: userData.email
-      } as any
+      }
     });
 
     if (existingUser) {
@@ -35,15 +57,27 @@ export const register = async (userData: RegisterDto): Promise<AuthUser> => {
         correo: userData.email,
         contrasena: hashedPassword,
         evita_ingredientes: []
-      } as any
+      }
     });
 
-    const user = newUser as any;
-    
-    return {
+    const user = newUser;
+
+    // Generar token JWT para el nuevo usuario
+    const tokenPayload = {
       id: user.id,
-      nombre: user.nombre || '',
-      correo: user.correo || ''
+      email: user.correo || ''
+    };
+
+    // Usar SignOptions desde la configuración centralizada
+    const token = jwt.sign(tokenPayload, JWT_SECRET, getSignOptions('access'));
+
+    return {
+      user: {
+        id: user.id,
+        nombre: user.nombre || '',
+        correo: user.correo || ''
+      },
+      token
     };
   } catch (error) {
     console.error('Error en el registro:', error);
@@ -56,17 +90,16 @@ export const register = async (userData: RegisterDto): Promise<AuthUser> => {
  * @param loginData Credenciales de inicio de sesión
  * @returns Usuario autenticado y token de acceso
  */
-export const login = async (loginData: LoginDto): Promise<{ user: AuthUser, token: string }> => {
+export const login = async (loginData: LoginData): Promise<AuthResponse> => {
   try {
     // Buscar usuario por correo
     const userFound = await prisma.usuarios.findFirst({
       where: {
         correo: loginData.email
-      } as any
+      }
     });
 
-    const user = userFound as any;
-
+    const user = userFound;
     if (!user) {
       throw new Error('Credenciales inválidas');
     }
@@ -82,16 +115,13 @@ export const login = async (loginData: LoginDto): Promise<{ user: AuthUser, toke
     }
 
     // Generar token JWT
-    const tokenPayload: TokenPayload = {
+    const tokenPayload = {
       id: user.id,
       email: user.correo || ''
     };
-      // Usar SignOptions tipado correctamente desde la configuración centralizada
-    const token = jwt.sign(
-      tokenPayload,
-      JWT_SECRET,
-      getSignOptions('access')
-    );
+
+    // Usar SignOptions desde la configuración centralizada
+    const token = jwt.sign(tokenPayload, JWT_SECRET, getSignOptions('access'));
 
     return {
       user: {
@@ -112,13 +142,10 @@ export const login = async (loginData: LoginDto): Promise<{ user: AuthUser, toke
  * @param token Token JWT
  * @returns Información del usuario asociado al token
  */
-export const verifyToken = async (token: string): Promise<AuthUser> => {
+export const verifyToken = async (token: string): Promise<UserResponse> => {
   try {
     // Verificar y decodificar el token
-    const decoded = jwt.verify(
-      token,
-      JWT_SECRET
-    ) as TokenPayload;
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
 
     // Buscar usuario por ID
     const userFound = await prisma.usuarios.findUnique({
@@ -126,9 +153,8 @@ export const verifyToken = async (token: string): Promise<AuthUser> => {
         id: decoded.id
       }
     });
-    
-    const user = userFound as any;
-    
+
+    const user = userFound;
     if (!user) {
       throw new Error('Usuario no encontrado');
     }
