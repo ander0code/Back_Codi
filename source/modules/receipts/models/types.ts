@@ -18,7 +18,7 @@ export interface ProductoRecibo {
   cantidad?: number | null;
   peso_estimado_kg?: number | null;
   co2e_estimado?: number | null;
-  impacto?: 'bajo' | 'medio' | 'alto';         // 🆕 Añade esto
+  impacto?: 'bajo' | 'medio' | 'alto';         // ✅ Cambiado de 'bajo' | 'medio' | 'alto'
   eco_amigable?: boolean;                      // 🆕 Y esto también
   categorias?: Categoria | null;
   recibos?: Recibo | null;

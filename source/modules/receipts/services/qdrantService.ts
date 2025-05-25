@@ -19,8 +19,8 @@ const SUPERMERCADO_TO_COLLECTION: Record<string, string> = {
 
 const embeddings = new OpenAIEmbeddings({
   openAIApiKey: process.env.OPENAI_API_KEY,
-  modelName: 'text-embedding-ada-002',
-  dimensions: 384, 
+  modelName: 'text-embedding-3-small',
+  dimensions: 1536, 
 });
 
 export const buscarProductoEnQdrant = async (
@@ -32,34 +32,76 @@ export const buscarProductoEnQdrant = async (
   categoria: string;
 } | null> => {
   try {
+    console.log(`🔍 ===== BÚSQUEDA QDRANT =====`);
+    console.log(`🔍 Producto: "${nombreProducto}"`);
+    console.log(`🏪 Supermercado: "${supermercado}"`);
+    
     const normalizedName = supermercado.toLowerCase().trim();
+    console.log(`🏪 Nombre normalizado: "${normalizedName}"`);
+    
     const collection = SUPERMERCADO_TO_COLLECTION[normalizedName];
+    console.log(`📂 Colección mapeada: "${collection}"`);
 
     if (!collection) {
+      console.error(`❌ Supermercado no reconocido: ${supermercado}`);
+      console.log(`📋 Supermercados disponibles:`, Object.keys(SUPERMERCADO_TO_COLLECTION));
       throw new Error(`Nombre de supermercado no reconocido: ${supermercado}`);
     }
 
+    console.log(`🔢 Generando vector para: "${nombreProducto}"`);
+    const vector = await obtenerVectorDelProducto(nombreProducto);
+    console.log(`🔢 Vector generado con ${vector.length} dimensiones`);
+
+    console.log(`🚀 Ejecutando búsqueda en colección: ${collection}`);
     const searchResult = await qdrantClient.search(collection, {
-      vector: await obtenerVectorDelProducto(nombreProducto),
+      vector: vector,
       limit: 5,
       with_payload: true,
     });
 
-    if (searchResult.length === 0) return null;
+    console.log(`📊 Resultados encontrados: ${searchResult.length}`);
 
-    const payload = searchResult[0].payload as any;
+    if (searchResult.length === 0) {
+      console.log(`❌ No se encontraron resultados para: "${nombreProducto}"`);
+      return null;
+    }
 
-    return {
+    // Log de todos los resultados para debugging
+    searchResult.forEach((result, index) => {
+      console.log(`📍 Resultado ${index + 1}:`);
+      console.log(`   - Score: ${result.score}`);
+      console.log(`   - Payload:`, result.payload);
+    });
+
+    const mejorResultado = searchResult[0];
+    const payload = mejorResultado.payload as any;
+
+    const resultado = {
       co2e_estimado: payload.co2_estimado,
       huella_categoria: payload.huella_categoria,
       categoria: payload.categoria,
     };
+
+    console.log(`✅ Mejor resultado seleccionado:`, resultado);
+    console.log(`✅ ===== FIN BÚSQUEDA QDRANT =====`);
+
+    return resultado;
   } catch (error) {
-    console.error('Error al buscar en Qdrant:', error);
+    console.error('❌ ===== ERROR EN BÚSQUEDA QDRANT =====');
+    console.error('❌ Error:', error);
+    console.error('❌ Stack:', error.stack);
     return null;
   }
 };
 
 const obtenerVectorDelProducto = async (nombreProducto: string): Promise<number[]> => {
-  return await embeddings.embedQuery(nombreProducto); // Devuelve vector de 384 dimensiones
+  console.log(`🔢 Generando embedding para: "${nombreProducto}"`);
+  try {
+    const vector = await embeddings.embedQuery(nombreProducto);
+    console.log(`✅ Embedding generado exitosamente`);
+    return vector;
+  } catch (error) {
+    console.error(`❌ Error generando embedding:`, error);
+    throw error;
+  }
 };

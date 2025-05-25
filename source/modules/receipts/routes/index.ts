@@ -39,7 +39,7 @@ router.use(authenticateJWT);
  * /api/receipts/process:
  *   post:
  *     summary: Procesar imagen de recibo con OCR
- *     description: Analiza una imagen de recibo usando OCR y devuelve los productos detectados
+ *     description: Analiza una imagen de recibo usando OCR y devuelve los productos detectados con su impacto ambiental
  *     tags: [Receipts]
  *     security:
  *       - bearerAuth: []
@@ -57,46 +57,132 @@ router.use(authenticateJWT);
  *                 format: binary
  *                 description: Imagen del recibo (JPEG, PNG, PDF)
  *     responses:
- *       200:
- *         description: Recibo analizado correctamente
+ *       201:
+ *         description: Recibo analizado exitosamente
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 id:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
  *                   type: string
- *                 establecimiento:
- *                   type: string
- *                 fecha:
- *                   type: string
- *                   format: date
- *                 monto_total:
- *                   type: number
- *                 co2_generado:
- *                   type: number
- *                 texto_escaneado:
- *                   type: string
- *                 productos:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       nombre:
- *                         type: string
- *                       co2:
- *                         type: number
- *                 nivel_impacto:
- *                   type: string
- *                   enum: [verde, amarillo, rojo]
+ *                   example: "Recibo analizado exitosamente"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     recibo_id:
+ *                       type: string
+ *                       example: "c6e6e21c-d580-4b62-aad3-86ca18475808"
+ *                     archivo:
+ *                       type: object
+ *                       properties:
+ *                         nombre:
+ *                           type: string
+ *                           example: "recibo_tottus.jpg"
+ *                         tamaño_kb:
+ *                           type: number
+ *                           example: 79
+ *                         tipo:
+ *                           type: string
+ *                           example: "image/jpeg"
+ *                     analisis:
+ *                       type: object
+ *                       properties:
+ *                         total_productos:
+ *                           type: number
+ *                           example: 6
+ *                         impacto_co2_total:
+ *                           type: number
+ *                           example: 5.46
+ *                         promedio_co2_por_producto:
+ *                           type: number
+ *                           example: 0.91
+ *                         es_recibo_verde:
+ *                           type: boolean
+ *                           example: false
+ *                         productos_eco_amigables:
+ *                           type: number
+ *                           example: 2
+ *                         porcentaje_eco:
+ *                           type: number
+ *                           example: 33
+ *                         puntos_verdes_obtenidos:
+ *                           type: number
+ *                           example: 0
+ *                     productos:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           nombre:
+ *                             type: string
+ *                             example: "MAYONESA ROUA"
+ *                           cantidad:
+ *                             type: number
+ *                             example: 1
+ *                           peso_kg:
+ *                             type: number
+ *                             example: 0.28
+ *                           co2_estimado:
+ *                             type: number
+ *                             example: 0.34
+ *                           nivel_impacto:
+ *                             type: string
+ *                             enum: [bajo, medio, alto]
+ *                             example: "medio"
+ *                           es_eco_amigable:
+ *                             type: boolean
+ *                             example: false
+ *                     recomendaciones:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           producto:
+ *                             type: string
+ *                             example: "MAYONESA ROUA"
+ *                           alternativa_sostenible:
+ *                             type: string
+ *                             example: "Mayonesa orgánica sin conservantes"
+ *                           ahorro_co2_estimado:
+ *                             type: number
+ *                             example: 0.10
  *       400:
- *         description: Error en la solicitud
+ *         description: Error en la solicitud - Archivo no proporcionado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "No se ha proporcionado ningún archivo"
  *       401:
  *         description: No autenticado
  *       413:
- *         description: Archivo muy grande
+ *         description: Archivo muy grande (máximo 5MB)
  *       500:
  *         description: Error del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Error al procesar la factura"
+ *                 message:
+ *                   type: string
+ *                   example: "Ocurrió un error durante el análisis del recibo. Por favor, intente nuevamente."
  */
 router.post('/process', upload.single('receipt'), receiptController.uploadReceipt);
 

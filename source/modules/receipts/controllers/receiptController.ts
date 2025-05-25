@@ -37,8 +37,16 @@ export const uploadReceipt = async (req: Request, res: Response): Promise<void> 
     }
 
     const usuarioId = req.user.id;
+    
+    console.log('🔄 Iniciando procesamiento de recibo...');
+    console.log('📄 Archivo:', receiptFile.originalname, 'Tamaño:', receiptFile.size);
+    
     // NUEVO: Procesar imagen y obtener productos + texto OCR
     const { productos, texto } = await receiptService.analyzeReceiptImage(receiptFile.buffer);
+
+    console.log('✅ Análisis completado:');
+    console.log('📦 Productos detectados:', productos.length);
+    console.log('🔍 Productos encontrados en Qdrant:', productos.filter(p => p.co2e_estimado > 0).length);
 
     const impactoCO2 = productos.reduce((total, producto) => {
       return total + (producto.co2e_estimado || 0);
@@ -46,6 +54,11 @@ export const uploadReceipt = async (req: Request, res: Response): Promise<void> 
 
     const co2ePromedio = impactoCO2 / (productos.length || 1);
     const esReciboVerde = co2ePromedio < 0.5;
+    
+    console.log('🌱 Evaluación del recibo:');
+    console.log('💨 CO2 total:', impactoCO2.toFixed(2), 'kg');
+    console.log('📊 CO2 promedio por producto:', co2ePromedio.toFixed(2), 'kg');
+    console.log('♻️ Es recibo verde:', esReciboVerde ? 'SÍ' : 'NO');
 
     const alternativasSugeridas = await receiptService.getAlternativasSostenibles(productos);
 
@@ -56,26 +69,60 @@ export const uploadReceipt = async (req: Request, res: Response): Promise<void> 
       productos
     );
 
+    console.log('💾 Recibo guardado con ID:', reciboGuardado.id);
+
+    // Formatear productos para respuesta más limpia
+    const productosFormateados = productos.map(producto => ({
+      nombre: producto.nombre_detectado,
+      cantidad: producto.cantidad || 1,
+      peso_kg: parseFloat((producto.peso_estimado_kg || 0).toFixed(2)),
+      co2_estimado: parseFloat((producto.co2e_estimado || 0).toFixed(2)),
+      nivel_impacto: producto.impacto,
+      es_eco_amigable: producto.eco_amigable || false
+    }));
+
+    // Calcular estadísticas del recibo
+    const totalProductos = productos.length;
+    const productosEcoAmigables = productos.filter(p => p.eco_amigable).length;
+    const porcentajeEco = totalProductos > 0 ? Math.round((productosEcoAmigables / totalProductos) * 100) : 0;
+
     res.status(201).json({
-      message: 'Factura analizada correctamente',
-      recibo_id: reciboGuardado.id,
-      file: {
-        filename: receiptFile.originalname,
-        mimetype: receiptFile.mimetype,
-        size: receiptFile.size
-      },
-      texto_extraido: texto,
-      productos_detectados: productos,
-      impacto_co2: impactoCO2,
-      es_recibo_verde: esReciboVerde,
-      puntos_obtenidos: esReciboVerde ? 10 : 0,
-      alternativas_sugeridas: alternativasSugeridas
+      success: true,
+      message: 'Recibo analizado exitosamente',
+      data: {
+        recibo_id: reciboGuardado.id,
+        archivo: {
+          nombre: receiptFile.originalname,
+          tamaño_kb: Math.round(receiptFile.size / 1024),
+          tipo: receiptFile.mimetype
+        },
+        analisis: {
+          total_productos: totalProductos,
+          impacto_co2_total: parseFloat(impactoCO2.toFixed(2)),
+          promedio_co2_por_producto: parseFloat(co2ePromedio.toFixed(2)),
+          es_recibo_verde: esReciboVerde,
+          productos_eco_amigables: productosEcoAmigables,
+          porcentaje_eco: porcentajeEco,
+          puntos_verdes_obtenidos: esReciboVerde ? 10 : 0
+        },
+        productos: productosFormateados,
+        recomendaciones: alternativasSugeridas.map(alt => ({
+          producto: alt.producto_original,
+          alternativa_sostenible: alt.alternativa_sugerida,
+          ahorro_co2_estimado: parseFloat((alt.reduccion_co2_estimada || 0).toFixed(2))
+        }))
+      }
     });
   } catch (error) {
-    console.error('Error al procesar la factura:', error);
-    res.status(500).json({ error: 'Error al procesar la factura' });
+    console.error('❌ Error al procesar la factura:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error al procesar la factura',
+      message: 'Ocurrió un error durante el análisis del recibo. Por favor, intente nuevamente.'
+    });
   }
 };
+
 /**
  * Controlador para obtener el impacto ambiental del usuario
  */

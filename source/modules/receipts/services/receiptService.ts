@@ -7,77 +7,191 @@ import path from 'path';
 import os from 'os';
 import { buscarProductoEnQdrant } from './qdrantService.js';
 import { clasificarImpactoProducto } from '../utils/impactClassifier.js';
-import { analizarTextoOCRConAgente } from '../utils/langchainAgent.js'; // ✅ Importar el agente
+import { analizarTextoOCRConAgente } from '../utils/langchainAgent.js'; 
+import { mapearCategoriaASupermercado } from '../utils/categoryMapper.js';
 
 export const analyzeReceiptImage = async (
   buffer: Buffer
 ): Promise<{ productos: ProductoRecibo[]; texto: string }> => {
   try {
+    console.log('🚀 ===== INICIANDO ANÁLISIS DE RECIBO =====');
+    
     // 1. Guardar la imagen temporalmente
     const tempDir = os.tmpdir();
     const tempPath = path.join(tempDir, `recibo_${Date.now()}.jpg`);
+    console.log('💾 Guardando imagen temporal en:', tempPath);
     await fs.writeFile(tempPath, buffer);
 
     // 2. Procesar imagen con OCR
+    console.log('📖 ===== INICIANDO PROCESO OCR =====');
     const ocrResult = await processImage(tempPath);
     const extractedText = ocrResult.text;
+    console.log('📝 OCR completado. Confianza:', ocrResult.confidence);
+    console.log('📄 Texto extraído (primeros 500 chars):', extractedText.substring(0, 500));
 
     // 3. Eliminar imagen temporal
-    await fs.unlink(tempPath);    // 4. Analizar con agente LangChain
-    console.log('📋 Iniciando análisis con DeepSeek...');
-    console.log('📝 Texto OCR extraído:', extractedText.substring(0, 300) + '...');
-    
+    await fs.unlink(tempPath);
+    console.log('🗑️ Imagen temporal eliminada');
+
+    // 4. Analizar con agente LangChain
+    console.log('🤖 ===== INICIANDO ANÁLISIS IA =====');
     const resultadoIA = await analizarTextoOCRConAgente(extractedText);
-    console.log('🤖 Resultado de DeepSeek:', JSON.stringify(resultadoIA, null, 2));
+    console.log('🤖 ===== FIN ANÁLISIS IA =====');
     
     const supermercadoDetectado = resultadoIA.supermercado;
     const productosOCR = resultadoIA.productos;
     
+    console.log('🏪 ===== RESUMEN DETECCIÓN =====');
     console.log('🏪 Supermercado detectado:', supermercadoDetectado);
     console.log('📦 Productos extraídos:', productosOCR.length);
+    console.log('📋 Lista de productos detectados:');
+    productosOCR.forEach((p, i) => {
+      console.log(`   ${i+1}. ${p.nombre} (${p.categoria}${p.subcategoria ? ` - ${p.subcategoria}` : ''})`);
+    });
 
-    // 5. Procesar productos
+    // 5. Procesar productos con mapeo de categorías
+    console.log('🔄 ===== PROCESANDO PRODUCTOS =====');
     const productosDetectados: ProductoRecibo[] = [];
 
-    for (const producto of productosOCR) {
+    for (let i = 0; i < productosOCR.length; i++) {
+      const producto = productosOCR[i];
+      console.log(`\n🔄 ===== PROCESANDO PRODUCTO ${i+1}/${productosOCR.length} =====`);
+      console.log(`📦 Nombre: ${producto.nombre}`);
+      
       const peso = producto.nombre.length * 0.01 + 0.2;
+      console.log(`⚖️ Peso estimado: ${peso.toFixed(2)} kg`);
 
-      const datosQdrant = await buscarProductoEnQdrant(producto.nombre, supermercadoDetectado);
-      if (!datosQdrant || datosQdrant.co2e_estimado === undefined) {
-        console.warn(`Producto no encontrado o sin CO2 estimado: ${producto.nombre}`);
-        continue;
-      }
-
-
-
-      const co2PorKg = datosQdrant.co2e_estimado / peso;
-      const clasificacion = clasificarImpactoProducto(
-        supermercadoDetectado,
-        datosQdrant.categoria,
-        co2PorKg
+      // Mapear categoría a la válida del supermercado
+      console.log(`🗺️ Iniciando mapeo de categoría...`);
+      const { categoria: categoriaFinal, subcategoria } = mapearCategoriaASupermercado(
+        producto.categoria,
+        supermercadoDetectado
       );
 
-      productosDetectados.push({
+      console.log(`📍 Categoría final: ${categoriaFinal}${subcategoria ? ` (${subcategoria})` : ''}`);
+
+      // Buscar en Qdrant con categoría mapeada
+      console.log(`🔍 ===== BÚSQUEDA EN QDRANT =====`);
+      console.log(`🔍 Buscando: "${producto.nombre}" en supermercado: "${supermercadoDetectado}"`);
+      
+      const datosQdrant = await buscarProductoEnQdrant(producto.nombre, supermercadoDetectado);
+      
+      let co2Estimado = 0;
+      let clasificacion: { nivel: 'bajo' | 'medio' | 'alto'; esEco: boolean } = { nivel: 'medio', esEco: false };
+
+      if (datosQdrant && datosQdrant.co2e_estimado !== undefined) {
+        co2Estimado = datosQdrant.co2e_estimado;
+        console.log(`✅ ===== PRODUCTO ENCONTRADO EN QDRANT =====`);
+        console.log(`💨 CO2 desde Qdrant: ${co2Estimado}`);
+        console.log(`📊 Categoría Qdrant: ${datosQdrant.categoria}`);
+        console.log(`🌍 Huella categoría: ${datosQdrant.huella_categoria}`);
+        
+        const co2PorKg = co2Estimado / peso;
+        console.log(`📊 CO2 por kg: ${co2PorKg.toFixed(2)}`);
+        
+        clasificacion = clasificarImpactoProducto(
+          supermercadoDetectado,
+          categoriaFinal,
+          co2PorKg
+        );
+        console.log(`🎯 Clasificación: Nivel=${clasificacion.nivel}, EcoAmigable=${clasificacion.esEco}`);
+      } else {
+        console.log(`⚠️ ===== PRODUCTO NO ENCONTRADO EN QDRANT =====`);
+        console.log(`🔄 Aplicando fallback con categoría: ${categoriaFinal}`);
+        
+        // Fallback: calcular CO2 estimado basado en categoría
+        co2Estimado = calcularCO2Fallback(categoriaFinal, peso);
+        console.log(`💨 CO2 fallback calculado: ${co2Estimado}`);
+        
+        clasificacion = clasificarImpactoProducto(
+          supermercadoDetectado,
+          categoriaFinal,
+          co2Estimado / peso
+        );
+        console.log(`🎯 Clasificación fallback: Nivel=${clasificacion.nivel}, EcoAmigable=${clasificacion.esEco}`);
+      }
+
+      const productoFinal = {
         id: 0,
         nombre_detectado: producto.nombre,
         productos: producto.nombre,
         cantidad: producto.cantidad,
         peso_estimado_kg: parseFloat(peso.toFixed(2)),
-        co2e_estimado: parseFloat(datosQdrant.co2e_estimado.toFixed(2)),
+        co2e_estimado: parseFloat(co2Estimado.toFixed(2)),
         categoria_id: null,
         impacto: clasificacion.nivel,
         eco_amigable: clasificacion.esEco,
+      };
+
+      console.log(`✅ Producto procesado:`, {
+        nombre: productoFinal.nombre_detectado,
+        peso: productoFinal.peso_estimado_kg,
+        co2: productoFinal.co2e_estimado,
+        impacto: productoFinal.impacto,
+        eco: productoFinal.eco_amigable
       });
+
+      productosDetectados.push(productoFinal);
+      console.log(`✅ ===== FIN PROCESAMIENTO PRODUCTO ${i+1} =====\n`);
     }
+
+    console.log('🎉 ===== RESUMEN FINAL =====');
+    console.log(`📦 Total productos procesados: ${productosDetectados.length}`);
+    const productosConCO2 = productosDetectados.filter(p => p.co2e_estimado > 0);
+    console.log(`💨 Productos con CO2 > 0: ${productosConCO2.length}`);
+    const co2Total = productosDetectados.reduce((sum, p) => sum + (p.co2e_estimado || 0), 0);
+    console.log(`🌍 CO2 total estimado: ${co2Total.toFixed(2)} kg`);
+    const productosEco = productosDetectados.filter(p => p.eco_amigable);
+    console.log(`♻️ Productos eco-amigables: ${productosEco.length}`);
 
     return {
       productos: productosDetectados,
       texto: extractedText,
     };
   } catch (error) {
-    console.error('Error al analizar imagen de recibo:', error);
+    console.error('❌ ===== ERROR EN ANÁLISIS DE RECIBO =====');
+    console.error('❌ Error:', error);
+    console.error('❌ Stack:', error.stack);
     throw new Error('No se pudo analizar la imagen del recibo');
   }
+};
+
+// Función fallback para calcular CO2 cuando no se encuentra en Qdrant
+const calcularCO2Fallback = (categoria: string, peso: number): number => {
+  // Valores promedio de CO2 por categoría (kg CO2e/kg)
+  const co2PorCategoria: Record<string, number> = {
+    // Tottus
+    'Congelados': 2.0,
+    'Desayunos y Panadería': 1.5,
+    'Despensa': 1.2,
+    'Dulces y Snacks': 5.0,
+    'Huevos': 4.0,
+    'Jamón': 6.0,
+    'Lácteos y Frescos': 2.5,
+    'Aguas y Jugos': 0.3,
+    'Cervezas': 1.0,
+    'Espumantes y Vinos': 1.5,
+    'Licores': 2.5,
+    // Metro
+    'Aves y Huevos': 2.5,
+    'Carnes': 20.0,
+    'Aves y Pescados': 2.0,
+    'Desayuno': 1.5,
+    'Embutidos y Fiambres': 6.0,
+    'Frutas y Verduras': 1.0,
+    'La Quesería': 10.0,
+    'Leches': 1.5,
+    'Mantequillas y Margarinas': 5.0,
+    'Yogures': 1.6,
+    // Otros supermercados - valores por defecto
+    'Abarrotes': 1.5,
+    'Bebidas': 0.8,
+    'Limpieza': 1.0,
+    'Cuidado Personal': 2.0
+  };
+
+  const co2Base = co2PorCategoria[categoria] || 1.5; // Valor por defecto
+  return co2Base * peso;
 };
 
 /**
