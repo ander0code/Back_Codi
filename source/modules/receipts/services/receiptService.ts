@@ -1,7 +1,7 @@
 import prisma from '../../../config/database.js';
 import { v4 as uuidv4 } from 'uuid';
 import { processImage } from './ocrService.js';
-import type { Categoria, ProductoRecibo, Recibo, Alternativa } from '../models/types.js';
+import type { ProductoRecibo, Recibo, Alternativa } from '../models/types.js';
 
 /**
  * Analiza una imagen de recibo para detectar productos
@@ -14,20 +14,33 @@ export const analyzeReceiptImage = async (imagePath: string): Promise<ProductoRe
     // const ocrResult = await processImage(imagePath);
     // const extractedText = ocrResult.text;
     
-    // Por ahora, simulamos la detección de productos
-    // Buscar en la base de datos productos que podrían coincidir
-    const categorias = await prisma.categorias.findMany();
-      // Crear productos simulados basados en las categorías existentes
-    const productosDetectados: ProductoRecibo[] = categorias.slice(0, 3).map((categoria: any) => ({
-      id: 0, // El ID se generará al guardar en la base de datos
-      nombre_detectado: `Producto de ${categoria.categoria}`,
-      productos: `Ejemplo de ${categoria.categoria}`,
-      categoria_id: categoria.id,
-      cantidad: 1,
-      peso_estimado_kg: 0.5,
-      co2e_estimado: 0.5 * categoria.co2e_promedio_por_kg,
-      categorias: categoria
-    }));
+    // Simulamos la detección de productos sin depender de categorías
+    const productosDetectados: ProductoRecibo[] = [
+      {
+        id: 0,
+        nombre_detectado: 'Producto A',
+        productos: 'Ejemplo de producto',
+        cantidad: 1,
+        peso_estimado_kg: 0.5,
+        co2e_estimado: 0.25
+      },
+      {
+        id: 0,
+        nombre_detectado: 'Producto B',
+        productos: 'Ejemplo de producto',
+        cantidad: 2,
+        peso_estimado_kg: 0.3,
+        co2e_estimado: 0.15
+      },
+      {
+        id: 0,
+        nombre_detectado: 'Producto C',
+        productos: 'Ejemplo de producto',
+        cantidad: 1,
+        peso_estimado_kg: 0.8,
+        co2e_estimado: 0.4
+      }
+    ];
     
     return productosDetectados;
   } catch (error) {
@@ -65,8 +78,7 @@ export const saveReceipt = async (
     
     // Determinar evaluación cualitativa
     const evaluacionHuella = determinarEvaluacionHuella(co2eTotal);
-    
-    // Crear recibo en la base de datos
+      // Crear recibo en la base de datos
     const recibo = await prisma.recibos.create({
       data: {
         id: uuidv4(),
@@ -82,7 +94,6 @@ export const saveReceipt = async (
           create: productos.map(producto => ({
             nombre_detectado: producto.nombre_detectado,
             productos: producto.productos,
-            categoria_id: producto.categoria_id,
             cantidad: producto.cantidad,
             peso_estimado_kg: producto.peso_estimado_kg,
             co2e_estimado: producto.co2e_estimado
@@ -90,11 +101,7 @@ export const saveReceipt = async (
         }
       },
       include: {
-        productos_recibo: {
-          include: {
-            categorias: true
-          }
-        }
+        productos_recibo: true
       }
     });
     
@@ -115,11 +122,7 @@ export const getRecibosByUsuarioId = async (usuarioId: string): Promise<Recibo[]
     const recibos = await prisma.recibos.findMany({
       where: { usuario_id: usuarioId },
       include: {
-        productos_recibo: {
-          include: {
-            categorias: true
-          }
-        }
+        productos_recibo: true
       },
       orderBy: {
         fecha_recibo: 'desc'
@@ -143,11 +146,7 @@ export const getReciboById = async (reciboId: string): Promise<Recibo | null> =>
     const recibo = await prisma.recibos.findUnique({
       where: { id: reciboId },
       include: {
-        productos_recibo: {
-          include: {
-            categorias: true
-          }
-        }
+        productos_recibo: true
       }
     });
     
@@ -250,18 +249,5 @@ export const getImpactoUsuario = async (usuarioId: string) => {
   } catch (error) {
     console.error('Error al obtener impacto del usuario:', error);
     throw new Error('No se pudo obtener el impacto ambiental');
-  }
-};
-
-/**
- * Obtiene todas las categorías
- * @returns Lista de categorías
- */
-export const getAllCategorias = async (): Promise<Categoria[]> => {
-  try {
-    return await prisma.categorias.findMany() as Categoria[];
-  } catch (error) {
-    console.error('Error al obtener categorías:', error);
-    throw new Error('No se pudieron obtener las categorías');
   }
 };

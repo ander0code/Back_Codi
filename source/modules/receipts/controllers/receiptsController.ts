@@ -70,9 +70,7 @@ export const getLatestReceipt = async (req: Request, res: Response): Promise<voi
       take: 1,
       include: {
         productos_recibo: {
-          include: {
-            categorias: true
-          }
+
         }
       }
     });
