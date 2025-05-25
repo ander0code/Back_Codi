@@ -1,47 +1,68 @@
 import prisma from '../../../config/database.js';
 import { v4 as uuidv4 } from 'uuid';
-import { processImage, extractProductos, extractEstablecimiento, extractFecha, extractMontoTotal } from './ocrService.js';
-import type { ProductoRecibo, Recibo, Alternativa } from '../models/types.js';
+import { processImage } from './ocrService.js';
+import type { ProductoRecibo, Recibo } from '../models/types.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-/**
- * Analiza una imagen de recibo para detectar productos
- * @param imagePath Ruta de la imagen
- * @returns Lista de productos detectados
- */
+import { buscarProductoEnQdrant } from './qdrantService.js';
+import { clasificarImpactoProducto } from '../utils/impactClassifier.js';
+import { analizarTextoOCRConAgente } from '../utils/langchainAgent.js'; // ✅ Importar el agente
+
 export const analyzeReceiptImage = async (
   buffer: Buffer
 ): Promise<{ productos: ProductoRecibo[]; texto: string }> => {
   try {
-    // Guardar la imagen temporalmente
+    // 1. Guardar la imagen temporalmente
     const tempDir = os.tmpdir();
     const tempPath = path.join(tempDir, `recibo_${Date.now()}.jpg`);
     await fs.writeFile(tempPath, buffer);
 
-    // Procesar imagen con OCR
+    // 2. Procesar imagen con OCR
     const ocrResult = await processImage(tempPath);
     const extractedText = ocrResult.text;
 
-    // Eliminar imagen temporal
+    // 3. Eliminar imagen temporal
     await fs.unlink(tempPath);
 
-    // Extraer productos
-    const productosOCR = extractProductos(extractedText);
+    // 4. Analizar con agente LangChain
+    const resultadoIA = await analizarTextoOCRConAgente(extractedText);
+    const supermercadoDetectado = resultadoIA.supermercado;
+    const productosOCR = resultadoIA.productos;
 
-    const productosDetectados: ProductoRecibo[] = productosOCR.map((producto) => {
+    // 5. Procesar productos
+    const productosDetectados: ProductoRecibo[] = [];
+
+    for (const producto of productosOCR) {
       const peso = producto.nombre.length * 0.01 + 0.2;
-      const co2e = peso * 0.5;
 
-      return {
+      const datosQdrant = await buscarProductoEnQdrant(producto.nombre, supermercadoDetectado);
+      if (!datosQdrant || datosQdrant.co2e_estimado === undefined) {
+        console.warn(`Producto no encontrado o sin CO2 estimado: ${producto.nombre}`);
+        continue;
+      }
+
+
+
+      const co2PorKg = datosQdrant.co2e_estimado / peso;
+      const clasificacion = clasificarImpactoProducto(
+        supermercadoDetectado,
+        datosQdrant.categoria,
+        co2PorKg
+      );
+
+      productosDetectados.push({
         id: 0,
         nombre_detectado: producto.nombre,
         productos: producto.nombre,
         cantidad: producto.cantidad,
         peso_estimado_kg: parseFloat(peso.toFixed(2)),
-        co2e_estimado: parseFloat(co2e.toFixed(2)),
-      };
-    });
+        co2e_estimado: parseFloat(datosQdrant.co2e_estimado.toFixed(2)),
+        categoria_id: null,
+        impacto: clasificacion.nivel,
+        eco_amigable: clasificacion.esEco,
+      });
+    }
 
     return {
       productos: productosDetectados,
@@ -72,6 +93,20 @@ export const saveReceipt = async (
     const co2eTotal = productos.reduce((total, producto) => {
       return total + (producto.co2e_estimado || 0);
     }, 0);
+
+    const totalCO2 = productos.reduce((acc, p) => acc + (p.co2e_estimado || 0), 0);
+    const totalProductos = productos.length;
+    const productosEco = productos.filter(p => p.eco_amigable).length;
+    const porcentajeEco = totalProductos ? productosEco / totalProductos : 0;
+
+    let nivelRecibo: 'verde' | 'regular' | 'rojo' = 'rojo';
+    if (porcentajeEco >= 0.7 && totalCO2 < 8) {
+      nivelRecibo = 'verde';
+    } else if (porcentajeEco >= 0.4 && totalCO2 < 15) {
+      nivelRecibo = 'regular';
+    }
+
+
     
     // Determinar si es un recibo verde
     const co2ePromedio = co2eTotal / (productos.length || 1);
@@ -211,7 +246,7 @@ const determinarEvaluacionHuella = (co2eTotal: number): string => {
  * @param productos Lista de productos
  * @returns Lista de alternativas
  */
-export const getAlternativasSostenibles = async (productos: ProductoRecibo[]): Promise<Alternativa[]> => {
+export const getAlternativasSostenibles = async (productos: ProductoRecibo[]) => {
   // Aquí podrías implementar lógica para sugerir alternativas más sostenibles
   // Por ahora, devolvemos sugerencias fijas
   return productos.map(producto => ({

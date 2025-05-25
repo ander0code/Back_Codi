@@ -1,6 +1,7 @@
 import app from './app.js';
 import { testConnection } from './config/database.js';
-
+import dotenv from 'dotenv';
+dotenv.config();
 // Puerto por defecto o valor de variables de entorno
 const PORT = process.env.PORT || 8000;
 
