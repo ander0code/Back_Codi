@@ -7,14 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model categorias {
-  id                   Int                @id @default(autoincrement())
-  categoria            String
-  subcategoria         String?
-  supermercado         String?
-  co2e_promedio_por_kg Float
-  productos_recibo     productos_recibo[]
-}
 
 model productos_recibo {
   id               Int         @id @default(autoincrement())
@@ -25,7 +17,6 @@ model productos_recibo {
   cantidad         Float?
   peso_estimado_kg Float?
   co2e_estimado    Float?
-  categorias       categorias? @relation(fields: [categoria_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   recibos          recibos?    @relation(fields: [recibo_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
