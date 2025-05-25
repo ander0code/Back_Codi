@@ -32,46 +32,74 @@ function generarCategoriasTexto(): string {
 
 const prompt = new PromptTemplate({
   template: `
-A partir del siguiente texto OCR de una boleta, debes:
-1. Identificar el supermercado (Tottus, Metro, Wong, Plaza Vea, Vivanda, Flora y Fauna).
-2. Listar productos comprados (nombre, cantidad, precio).
-3. Clasificarlos en las categorías válidas para ese supermercado.
+Eres un experto en análisis de recibos de supermercados peruanos. Tu tarea es extraer información estructurada del siguiente texto OCR.
 
-Si el supermercado es **Tottus**, también asigna la **subcategoría** correcta.
+INSTRUCCIONES:
+1. Identifica el supermercado exacto: Tottus, Metro, Wong, Plaza Vea, Vivanda, Flora y Fauna
+2. Extrae TODOS los productos con nombre, cantidad y precio
+3. Clasifica cada producto en la categoría correcta según el supermercado
+4. Devuelve ÚNICAMENTE un JSON válido, sin texto adicional
 
-Solo responde con el siguiente formato JSON exacto:
+FORMATO DE RESPUESTA REQUERIDO:
 {{
-  "supermercado": "...",
+  "supermercado": "nombre_exacto_del_supermercado",
   "productos": [
     {{
-      "nombre": "...",
-      "cantidad": ...,
-      "precio": ...,
-      "categoria": "...",
-      "subcategoria": "..." // opcional
+      "nombre": "nombre_del_producto",
+      "cantidad": numero_entero,
+      "precio": numero_decimal,
+      "categoria": "categoria_del_supermercado"
     }}
   ]
 }}
 
-Categorías válidas por supermercado:
+CATEGORÍAS VÁLIDAS POR SUPERMERCADO:
 {categorias}
 
-Texto OCR:
-"{ocr}"
-  `,
+TEXTO OCR A ANALIZAR:
+{ocr}
+
+RESPUESTA (solo JSON):`,
   inputVariables: ['ocr', 'categorias'],
   partialVariables: { format_instructions: parser.getFormatInstructions() }
 });
 
 const model = new ChatOpenAI({
   temperature: 0,
-  modelName: 'gpt-3.5-turbo',
-  openAIApiKey: process.env.OPENAI_API_KEY
+  modelName: 'deepseek-chat',
+  openAIApiKey: process.env.DEEPSEEK_API_KEY,
+  configuration: {
+    baseURL: 'https://api.deepseek.com',
+  }
 });
+
+// Verificar configuración
+if (!process.env.DEEPSEEK_API_KEY) {
+  console.error('❌ DEEPSEEK_API_KEY no está configurada en las variables de entorno');
+} else {
+  console.log('✅ DeepSeek API configurada correctamente');
+}
 
 const chain = RunnableSequence.from([prompt, model, parser]);
 
 export async function analizarTextoOCRConAgente(ocr: string) {
-  const categoriasTexto = generarCategoriasTexto();
-  return await chain.invoke({ ocr, categorias: categoriasTexto });
+  try {
+    console.log('🔄 Iniciando análisis con DeepSeek...');
+    console.log('📝 Texto OCR recibido:', ocr.substring(0, 200) + '...');
+    
+    const categoriasTexto = generarCategoriasTexto();
+    console.log('📊 Categorías generadas para el prompt');
+    
+    const resultado = await chain.invoke({ ocr, categorias: categoriasTexto });
+    console.log('✅ Resultado de DeepSeek:', resultado);
+    
+    return resultado;
+  } catch (error) {
+    console.error('❌ Error en análisis DeepSeek:', error);
+    // Retornar formato básico en caso de error
+    return {
+      supermercado: 'Desconocido',
+      productos: []
+    };
+  }
 }

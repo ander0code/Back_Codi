@@ -23,12 +23,18 @@ export const analyzeReceiptImage = async (
     const extractedText = ocrResult.text;
 
     // 3. Eliminar imagen temporal
-    await fs.unlink(tempPath);
-
-    // 4. Analizar con agente LangChain
+    await fs.unlink(tempPath);    // 4. Analizar con agente LangChain
+    console.log('📋 Iniciando análisis con DeepSeek...');
+    console.log('📝 Texto OCR extraído:', extractedText.substring(0, 300) + '...');
+    
     const resultadoIA = await analizarTextoOCRConAgente(extractedText);
+    console.log('🤖 Resultado de DeepSeek:', JSON.stringify(resultadoIA, null, 2));
+    
     const supermercadoDetectado = resultadoIA.supermercado;
     const productosOCR = resultadoIA.productos;
+    
+    console.log('🏪 Supermercado detectado:', supermercadoDetectado);
+    console.log('📦 Productos extraídos:', productosOCR.length);
 
     // 5. Procesar productos
     const productosDetectados: ProductoRecibo[] = [];
