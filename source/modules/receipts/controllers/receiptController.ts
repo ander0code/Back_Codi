@@ -29,52 +29,46 @@ export const getDashboard = async (req: Request, res: Response): Promise<void> =
  */
 export const uploadReceipt = async (req: Request, res: Response): Promise<void> => {
   try {
-    // Obtener el archivo subido por el middleware multer
     const receiptFile = req.file;
-    
+
     if (!receiptFile) {
       res.status(400).json({ error: 'No se ha proporcionado ningún archivo' });
       return;
     }
-    
-    // En un entorno real, obtendríamos el ID del usuario desde el token
-    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
-    
-    // Procesar la imagen con el servicio OCR
-    const productosDetectados = await receiptService.analyzeReceiptImage(receiptFile.path);
-    
-    // Calcular impacto total
-    const impactoCO2 = productosDetectados.reduce((total, producto) => {
+
+    const usuarioId = req.user.id;
+    // NUEVO: Procesar imagen y obtener productos + texto OCR
+    const { productos, texto } = await receiptService.analyzeReceiptImage(receiptFile.buffer);
+
+    const impactoCO2 = productos.reduce((total, producto) => {
       return total + (producto.co2e_estimado || 0);
     }, 0);
-    
-    // Determinar si es recibo verde (promedio < 0.5 kg CO2e)
-    const co2ePromedio = impactoCO2 / (productosDetectados.length || 1);
+
+    const co2ePromedio = impactoCO2 / (productos.length || 1);
     const esReciboVerde = co2ePromedio < 0.5;
-    
-    // Obtener alternativas sostenibles
-    const alternativasSugeridas = await receiptService.getAlternativasSostenibles(productosDetectados);
-    
-    // Guardar el recibo en la base de datos
+
+    const alternativasSugeridas = await receiptService.getAlternativasSostenibles(productos);
+
     const reciboGuardado = await receiptService.saveReceipt(
       usuarioId,
       'upload',
-      'Texto extraído del recibo', // Aquí iría el texto real extraído por OCR
-      productosDetectados
+      texto, // ✅ Texto real del OCR
+      productos
     );
-    
+
     res.status(201).json({
       message: 'Factura analizada correctamente',
       recibo_id: reciboGuardado.id,
       file: {
-        filename: receiptFile.filename,
+        filename: receiptFile.originalname,
         mimetype: receiptFile.mimetype,
         size: receiptFile.size
       },
-      productos_detectados: productosDetectados,
+      texto_extraido: texto,
+      productos_detectados: productos,
       impacto_co2: impactoCO2,
       es_recibo_verde: esReciboVerde,
-      puntos_obtenidos: esReciboVerde ? 10 : 0, // Simple: 10 puntos por recibo verde
+      puntos_obtenidos: esReciboVerde ? 10 : 0,
       alternativas_sugeridas: alternativasSugeridas
     });
   } catch (error) {
@@ -82,7 +76,6 @@ export const uploadReceipt = async (req: Request, res: Response): Promise<void> 
     res.status(500).json({ error: 'Error al procesar la factura' });
   }
 };
-
 /**
  * Controlador para obtener el impacto ambiental del usuario
  */
@@ -220,5 +213,99 @@ export const getReceiptDetail = async (req: Request, res: Response): Promise<voi
   } catch (error) {
     console.error('Error al obtener detalle del recibo:', error);
     res.status(500).json({ error: 'Error al obtener detalle del recibo' });
+  }
+};
+
+/**
+ * Controlador para guardar un recibo procesado
+ */
+export const saveReceipt = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
+    const { establecimiento, fecha, monto_total, co2_generado, productos } = req.body;
+    
+    const reciboGuardado = await receiptService.saveReceipt(
+      usuarioId,
+      establecimiento,
+      'Recibo guardado manualmente',
+      productos || []
+    );
+    
+    res.status(201).json({
+      message: 'Recibo guardado exitosamente',
+      recibo_id: reciboGuardado.id
+    });
+  } catch (error) {
+    console.error('Error al guardar recibo:', error);
+    res.status(500).json({ error: 'Error al guardar recibo' });
+  }
+};
+
+/**
+ * Controlador para obtener todos los recibos del usuario
+ */
+export const getAllReceipts = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    
+    const recibos = await receiptService.getRecibosByUsuarioId(usuarioId);
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedRecibos = recibos.slice(startIndex, endIndex);
+    
+    res.status(200).json({
+      recibos: paginatedRecibos,
+      total: recibos.length,
+      page: page
+    });
+  } catch (error) {
+    console.error('Error al obtener recibos:', error);
+    res.status(500).json({ error: 'Error al obtener recibos' });
+  }
+};
+
+/**
+ * Controlador para obtener el último recibo del usuario
+ */
+export const getLatestReceipt = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
+    const recibos = await receiptService.getRecibosByUsuarioId(usuarioId);
+    
+    if (recibos.length === 0) {
+      res.status(404).json({ error: 'No se encontraron recibos' });
+      return;
+    }
+    
+    const ultimoRecibo = recibos.sort((a, b) => 
+      new Date(b.fecha_recibo || 0).getTime() - new Date(a.fecha_recibo || 0).getTime()
+    )[0];
+    
+    res.status(200).json(ultimoRecibo);
+  } catch (error) {
+    console.error('Error al obtener último recibo:', error);
+    res.status(500).json({ error: 'Error al obtener último recibo' });
+  }
+};
+
+/**
+ * Controlador para obtener detalles de un recibo específico
+ */
+export const getReceiptDetails = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const recibo = await receiptService.getReciboById(id);
+    
+    if (!recibo) {
+      res.status(404).json({ error: 'Recibo no encontrado' });
+      return;
+    }
+    
+    res.status(200).json(recibo);
+  } catch (error) {
+    console.error('Error al obtener detalles del recibo:', error);
+    res.status(500).json({ error: 'Error al obtener detalles del recibo' });
   }
 };

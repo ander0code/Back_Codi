@@ -6,13 +6,18 @@ import { JWT_SECRET } from '../config/jwt.js';
 declare global {
   namespace Express {
     interface Request {
-      user?: any;
+      user?: {
+        id: string;
+        email: string;
+        [key: string]: any;
+      };
     }
   }
 }
 
 /**
  * Middleware para verificar autenticación JWT
+ * Extrae la información del usuario del token y la añade a req.user
  */
 export const authenticateJWT = (req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -24,7 +29,7 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
     const authHeader = req.headers.authorization;
     
     if (!authHeader) {
-      res.status(401).json({ error: 'No se proporcionó token de autenticación' });
+      res.status(401).json({ error: 'Token de autenticación requerido' });
       return;
     }
 
@@ -32,23 +37,23 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
     const token = authHeader.split(' ')[1];
     
     if (!token) {
-      res.status(401).json({ error: 'Formato de token inválido' });
+      res.status(401).json({ error: 'Formato de token inválido. Use: Bearer <token>' });
       return;
     }
 
     // Verificar el token
-    jwt.verify(token, JWT_SECRET, (err, user) => {
+    jwt.verify(token, JWT_SECRET, (err, decoded) => {
       if (err) {
         return res.status(403).json({ error: 'Token inválido o expirado' });
       }
       
-      // Añadir usuario al objeto de solicitud
-      req.user = user;
+      // Añadir información del usuario al objeto de solicitud
+      req.user = decoded as { id: string; email: string; [key: string]: any };
       next();
     });
   } catch (error) {
     console.error('Error en la autenticación:', error);
-    res.status(500).json({ error: 'Error en la autenticación' });
+    res.status(500).json({ error: 'Error interno de autenticación' });
   }
 };
 
