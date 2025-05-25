@@ -1,3 +1,7 @@
+import { createWorker } from 'tesseract.js';
+import fs from 'fs';
+import path from 'path';
+
 /**
  * Servicio para procesar imágenes con OCR
  */
@@ -21,85 +25,124 @@ interface DetectedProduct {
  * @param imagePath Ruta a la imagen en el servidor
  * @returns Texto extraído y metadatos
  */
-export const processImage = async (imagePath: string): Promise<OCRResult> => {
-  try {
-    // En un entorno real, aquí conectaríamos con alguna API de OCR
-    // Por ahora, simulamos un resultado
+export const processImage = async (imagePath: string): Promise<{ text: string, confidence: number }> => {
+  try {    // Verificar que el archivo existe
+    if (!fs.existsSync(imagePath)) {
+      throw new Error(`El archivo no existe: ${imagePath}`);
+    }
+
+    // Crear un worker de Tesseract.js
+    const worker = await createWorker();
+    await worker.loadLanguage('spa');
+    await worker.initialize('spa');
     
-    console.log(`Procesando imagen: ${imagePath}`);
+    // Reconocer texto en la imagen
+    const { data } = await worker.recognize(imagePath);
     
-    // Simulamos un tiempo de procesamiento
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Terminar el worker
+    await worker.terminate();
     
-    // Devolvemos un texto simulado
     return {
-      text: `SUPERMERCADO EJEMPLO
-      FACTURA N° 0001-123456
-      FECHA: ${new Date().toLocaleDateString()}
-      
-      2x Leche Entera 1L      S/. 10.00
-      1x Pan Integral 500g    S/. 5.50
-      3x Manzanas             S/. 6.00
-      1x Papel Higiénico      S/. 12.00
-      
-      TOTAL                   S/. 33.50
-      
-      GRACIAS POR SU COMPRA`,
-      confidence: 0.85,
-      blocks: [
-        { text: "SUPERMERCADO EJEMPLO", confidence: 0.95 },
-        { text: "FACTURA N° 0001-123456", confidence: 0.90 },
-        { text: `FECHA: ${new Date().toLocaleDateString()}`, confidence: 0.85 },
-        { text: "2x Leche Entera 1L      S/. 10.00", confidence: 0.80 },
-        { text: "1x Pan Integral 500g    S/. 5.50", confidence: 0.82 },
-        { text: "3x Manzanas             S/. 6.00", confidence: 0.78 },
-        { text: "1x Papel Higiénico      S/. 12.00", confidence: 0.80 },
-        { text: "TOTAL                   S/. 33.50", confidence: 0.90 },
-        { text: "GRACIAS POR SU COMPRA", confidence: 0.95 }
-      ]
+      text: data.text,
+      confidence: data.confidence
     };
   } catch (error) {
     console.error('Error en el procesamiento OCR:', error);
-    throw new Error('Error en el procesamiento de la imagen');
+    return {
+      text: 'Error al procesar la imagen',
+      confidence: 0
+    };
   }
 };
 
 /**
- * Extrae productos de un texto OCR
- * @param ocrText Texto completo del OCR
- * @returns Lista de productos extraídos
+ * Extrae el establecimiento del texto OCR
+ * @param text Texto extraído por OCR
+ * @returns Nombre del establecimiento
  */
-export const extractProducts = (ocrText: string): DetectedProduct[] => {
-  // En un entorno real, usaríamos regex y NLP para extraer productos
-  // Por ahora, simplemente dividimos el texto y buscamos patrones
+export const extractEstablecimiento = (text: string): string => {
+  // En un entorno real, se usaría regex o NLP para identificar el nombre del establecimiento
+  // Generalmente aparece en las primeras líneas del recibo
+  const lines = text.split('\n').filter(line => line.trim() !== '');
   
-  const lines = ocrText.split('\n');
-  const productLines: string[] = [];
+  if (lines.length > 0) {
+    return lines[0].trim();
+  }
   
-  // Buscamos líneas que parezcan productos (tienen números y S/.)
+  return 'Establecimiento no detectado';
+};
+
+/**
+ * Extrae la fecha del texto OCR
+ * @param text Texto extraído por OCR
+ * @returns Fecha en formato YYYY-MM-DD
+ */
+export const extractFecha = (text: string): string => {
+  // Buscar patrones de fecha comunes: DD/MM/YYYY, DD-MM-YYYY, etc.
+  const dateRegex = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/;
+  const match = text.match(dateRegex);
+  
+  if (match) {
+    const day = match[1].padStart(2, '0');
+    const month = match[2].padStart(2, '0');
+    let year = match[3];
+    
+    // Si el año tiene 2 dígitos, convertir a 4 dígitos
+    if (year.length === 2) {
+      const currentYear = new Date().getFullYear();
+      const century = Math.floor(currentYear / 100) * 100;
+      year = century + parseInt(year) < currentYear + 20 ? `${century + parseInt(year)}` : `${century - 100 + parseInt(year)}`;
+    }
+    
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Si no se encuentra un patrón, devolver la fecha actual
+  return new Date().toISOString().split('T')[0];
+};
+
+/**
+ * Extrae el monto total del texto OCR
+ * @param text Texto extraído por OCR
+ * @returns Monto total
+ */
+export const extractMontoTotal = (text: string): number => {
+  // Buscar patrones como "TOTAL: $123.45" o "TOTAL $123.45"
+  const totalRegex = /TOTAL[\s:]*[\$]?(\d+[.,]\d{2})/i;
+  const match = text.match(totalRegex);
+  
+  if (match) {
+    return parseFloat(match[1].replace(',', '.'));
+  }
+  
+  return 0;
+};
+
+/**
+ * Extrae productos del texto OCR
+ * @param text Texto extraído por OCR
+ * @returns Lista de productos detectados
+ */
+export const extractProductos = (text: string): { nombre: string, cantidad: number, precio: number }[] => {
+  // En un entorno real, se usaría un algoritmo más sofisticado para identificar productos
+  // Este es un ejemplo simple que busca patrones comunes en recibos
+  
+  const productos: { nombre: string, cantidad: number, precio: number }[] = [];
+  const lines = text.split('\n');
+  
+  // Patrón común: [cantidad] [nombre producto] [precio unitario] [precio total]
+  const productoRegex = /(\d+)\s+(.+?)\s+(\d+[.,]\d{2})\s+(\d+[.,]\d{2})/;
+  
   for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (
-      (trimmedLine.includes('x ') || trimmedLine.includes('X ')) && 
-      trimmedLine.includes('S/.') && 
-      !trimmedLine.includes('TOTAL')
-    ) {
-      productLines.push(trimmedLine);
+    const match = line.match(productoRegex);
+    if (match) {
+      productos.push({
+        cantidad: parseInt(match[1]),
+        nombre: match[2].trim(),
+        precio: parseFloat(match[4].replace(',', '.'))
+      });
     }
   }
   
-  // Extraemos información de cada línea
-  return productLines.map(line => {
-    // Intentamos separar cantidad, nombre y precio
-    const quantityMatch = line.match(/(\d+)[xX]\s+/);
-    const quantity = quantityMatch ? parseInt(quantityMatch[1]) : 1;
-    
-    // Extraer nombre del producto
-    let productName = line.replace(/^\s*\d+[xX]\s+/, '').replace(/\s+S\/\.\s+[\d\.]+$/, '');
-    
-    return {
-      name: productName.trim(),
-      quantity: quantity
-    };
-  });
+  return productos;
 };

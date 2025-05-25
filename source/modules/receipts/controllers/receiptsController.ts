@@ -69,9 +69,7 @@ export const getLatestReceipt = async (req: Request, res: Response): Promise<voi
       orderBy: { fecha_recibo: 'desc' },
       take: 1,
       include: {
-        productos_recibo: {
-
-        }
+        productos_recibo: true
       }
     });
     
@@ -247,9 +245,11 @@ export const getReceiptDetails = async (req: Request, res: Response): Promise<vo
  *                   type: number
  *                 nivel_impacto:
  *                   type: string
- *                   enum: [verde, amarillo, rojo]
+ *                   enum: [verde, regular, alto]
  *                 productos_eco:
  *                   type: number
+ *                 texto_escaneado:
+ *                   type: string
  *                 productos:
  *                   type: array
  *                   items:
@@ -282,9 +282,14 @@ export const processReceiptImage = async (req: Request, res: Response): Promise<
     
     // En un entorno real, obtendríamos el ID del usuario desde el token
     const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
+      // Procesar la imagen con OCR mediante la función del servicio
+    const imagePath = req.file.path;
+    // Importamos directamente del ocrService en lugar de usar receiptService
+    const { processImage } = await import('../services/ocrService.js');
+    const ocrResult = await processImage(imagePath);
     
-    // Analizar la imagen
-    const productosDetectados = await receiptService.analyzeReceiptImage(req.file.path);
+    // Analizar la imagen y extraer productos
+    const productosDetectados = await receiptService.analyzeReceiptImage(imagePath);
     
     // Calcular métricas
     const co2Total = productosDetectados.reduce((sum, p) => sum + (p.co2e_estimado || 0), 0);
@@ -301,18 +306,27 @@ export const processReceiptImage = async (req: Request, res: Response): Promise<
     // Generar ID del recibo
     const reciboId = uuidv4();
     
+    // Obtener fecha del recibo (en un caso real, se extraería del OCR)
+    const fechaRecibo = new Date().toISOString().split('T')[0];
+    
+    // Obtener monto total (en un caso real, se extraería del OCR)
+    const montoTotal = 120.50; // Valor por defecto
+    
     res.status(200).json({
       id: reciboId,
-      establecimiento: 'Supermercado (detectado)',
-      fecha: new Date().toISOString().split('T')[0],
-      monto_total: 120.50,
+      establecimiento: 'Supermercado (detectado)', // En un caso real, se extraería del OCR
+      fecha: fechaRecibo,
+      monto_total: montoTotal,
       co2_generado: co2Total,
       nivel_impacto: nivelImpacto,
       productos_eco: productosEco,
-      texto_escaneado: 'Texto extraído del recibo mediante OCR',
+      texto_escaneado: ocrResult.text || 'Texto no disponible',
+      imagen_url: req.file.path.replace(/\\/g, '/'),
       productos: productosDetectados.map(p => ({
         nombre: p.nombre_detectado,
-        co2: p.co2e_estimado
+        co2: p.co2e_estimado,
+        cantidad: p.cantidad || 1,
+        peso_estimado_kg: p.peso_estimado_kg || 0
       }))
     });
   } catch (error) {
@@ -322,7 +336,70 @@ export const processReceiptImage = async (req: Request, res: Response): Promise<
 };
 
 /**
- * Guardar un recibo analizado en la base de datos
+ * @swagger
+ * /api/receipts/save:
+ *   post:
+ *     summary: Guardar un recibo analizado
+ *     description: Guarda un recibo previamente analizado en la base de datos
+ *     tags: [Recibos]
+ *     security:
+ *       - userIdHeader: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               id:
+ *                 type: string
+ *                 description: ID del recibo (si fue generado en el paso anterior)
+ *               establecimiento:
+ *                 type: string
+ *               fecha:
+ *                 type: string
+ *                 format: date
+ *               monto_total:
+ *                 type: number
+ *               co2_generado:
+ *                 type: number
+ *               nivel_impacto:
+ *                 type: string
+ *               productos_eco:
+ *                 type: number
+ *               imagen_url:
+ *                 type: string
+ *               texto_escaneado:
+ *                 type: string
+ *               productos:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     nombre:
+ *                       type: string
+ *                     co2:
+ *                       type: number
+ *                     cantidad:
+ *                       type: number
+ *                     peso_estimado_kg:
+ *                       type: number
+ *     responses:
+ *       201:
+ *         description: Recibo guardado correctamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: string
+ *                 mensaje:
+ *                   type: string
+ *       400:
+ *         description: Error en la solicitud
+ *       500:
+ *         description: Error del servidor
  */
 export const saveReceipt = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -334,12 +411,13 @@ export const saveReceipt = async (req: Request, res: Response): Promise<void> =>
       co2_generado,
       nivel_impacto,
       productos_eco,
+      imagen_url,
       texto_escaneado,
       productos
     } = req.body;
     
     // Validar datos mínimos
-    if (!id || !establecimiento) {
+    if (!establecimiento || !fecha) {
       res.status(400).json({ error: 'Faltan datos obligatorios para guardar el recibo' });
       return;
     }
@@ -349,10 +427,16 @@ export const saveReceipt = async (req: Request, res: Response): Promise<void> =>
     
     // Convertir productos al formato esperado por el servicio
     const productosFormateados = (productos || []).map((p: any) => ({
+      id: 0,
       nombre_detectado: p.nombre,
       productos: p.nombre, // Reutilizar el nombre como identificador de producto
+      cantidad: p.cantidad || 1,
+      peso_estimado_kg: p.peso_estimado_kg || 0,
       co2e_estimado: p.co2
     }));
+    
+    // Generar un nuevo ID si no se proporcionó uno
+    const reciboId = id || uuidv4();
     
     // Guardar recibo en la base de datos
     const reciboGuardado = await receiptService.saveReceipt(

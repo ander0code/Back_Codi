@@ -41,11 +41,8 @@ model usuarios {
   nombre                String?
   correo                String?
   contrasena            String?
-  objetivo_consumo      String?
-  estilo_vida           String?
-  evita_ingredientes    String[]
-  prefiere_supermercado String?
-  precio_prioridad      Boolean?  @default(false)
-  empaques_sostenibles  Boolean?  @default(true)
+  objetivo_consumo      Json?
+  estilo_vida           Json?
+  evita_ingredientes    Json?
   recibos               recibos[]
 }
