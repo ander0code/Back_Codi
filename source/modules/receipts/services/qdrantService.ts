@@ -5,15 +5,16 @@ import { OpenAIEmbeddings } from '@langchain/openai';
 const qdrantClient = new QdrantClient({ url: 'http://168.138.135.113:6333' });
 
 const SUPERMERCADO_TO_COLLECTION: Record<string, string> = {
+  'wong': 'wong',
+  'vivanda': 'vivanda',
   'tottus': 'tottus',
   'tottus s.a.': 'tottus',
+  'plazavea': 'plazavea',
+  'plaza vea': 'plazavea',
   'metro': 'metro',
-  'wong': 'wong',
-  'plaza vea': 'plaza_vea',
-  'plazavea': 'plaza_vea',
   'flora y fauna': 'flora_y_fauna',
   'flora & fauna': 'flora_y_fauna',
-  'vivanda': 'vivanda',
+  'flora_y_fauna': 'flora_y_fauna'
 };
 
 
@@ -95,13 +96,13 @@ export const buscarProductoEnQdrant = async (
 };
 
 const obtenerVectorDelProducto = async (nombreProducto: string): Promise<number[]> => {
-  console.log(`🔢 Generando embedding para: "${nombreProducto}"`);
+  console.log(`🔢 Generando embedding con text-embedding-3-small para: "${nombreProducto}"`);
   try {
     const vector = await embeddings.embedQuery(nombreProducto);
-    console.log(`✅ Embedding generado exitosamente`);
+    console.log(`✅ Embedding text-embedding-3-small generado exitosamente con ${vector.length} dimensiones`);
     return vector;
   } catch (error) {
-    console.error(`❌ Error generando embedding:`, error);
+    console.error(`❌ Error generando embedding con text-embedding-3-small:`, error);
     throw error;
   }
 };

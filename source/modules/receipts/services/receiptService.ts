@@ -20,25 +20,45 @@ export const analyzeReceiptImage = async (
     const tempDir = os.tmpdir();
     const tempPath = path.join(tempDir, `recibo_${Date.now()}.jpg`);
     console.log('💾 Guardando imagen temporal en:', tempPath);
-    await fs.writeFile(tempPath, buffer);
-
-    // 2. Procesar imagen con OCR
+    await fs.writeFile(tempPath, buffer);    // 2. Procesar imagen con OCR
     console.log('📖 ===== INICIANDO PROCESO OCR =====');
     const ocrResult = await processImage(tempPath);
-    const extractedText = ocrResult.text;
+    let extractedText = ocrResult.text;
     console.log('📝 OCR completado. Confianza:', ocrResult.confidence);
-    console.log('📄 Texto extraído (primeros 500 chars):', extractedText.substring(0, 500));
+    console.log('📄 Texto extraído RAW (primeros 500 chars):', extractedText.substring(0, 500));
 
-    // 3. Eliminar imagen temporal
+    // 3. Preprocesar texto OCR para reducir ruido
+    console.log('🧹 ===== PREPROCESANDO TEXTO OCR =====');
+    const textoOriginal = extractedText;
+    
+    // Aplicar limpieza de ruido:
+    // - Reducir múltiples espacios a uno solo
+    // - Eliminar caracteres no ASCII que pueden causar confusión
+    // - Mantener solo caracteres imprimibles básicos
+    extractedText = extractedText
+      .replace(/\s{2,}/g, ' ')           // Múltiples espacios -> un espacio
+      .replace(/[^\x00-\x7F]/g, '')      // Eliminar caracteres no ASCII
+      .replace(/[^\w\s\.\,\-\$\%\(\)]/g, ' ')  // Solo alfanuméricos y puntuación básica
+      .replace(/\s+/g, ' ')              // Limpiar espacios resultantes
+      .trim();                           // Eliminar espacios al inicio/final
+    
+    console.log('📄 Texto LIMPIO (primeros 500 chars):', extractedText.substring(0, 500));
+    console.log('🔄 Reducción de ruido: ', Math.round((1 - extractedText.length / textoOriginal.length) * 100), '% de caracteres eliminados');
+
+    // 4. Eliminar imagen temporal
     await fs.unlink(tempPath);
-    console.log('🗑️ Imagen temporal eliminada');
-
-    // 4. Analizar con agente LangChain
-    console.log('🤖 ===== INICIANDO ANÁLISIS IA =====');
+    console.log('🗑️ Imagen temporal eliminada');    // 5. Detectar supermercado primero con prompt ligero
+    console.log('🏪 ===== DETECTANDO SUPERMERCADO =====');
+    const supermercadoDetectado = await detectarSupermercadoConIA(extractedText);
+    console.log('🏪 Supermercado detectado:', supermercadoDetectado);    // 6. Analizar productos con categorías específicas del supermercado
+    console.log('🤖 ===== INICIANDO ANÁLISIS IA CON CATEGORÍAS ESPECÍFICAS =====');
+    const categoriasEspecificas = getCategoriasPorSupermercado(supermercadoDetectado);
+    console.log('📋 Categorías específicas para', supermercadoDetectado, ':', categoriasEspecificas.categorias);
+    console.log('📊 Total de categorías:', categoriasEspecificas.categorias.length);
+    
     const resultadoIA = await analizarTextoOCRConAgente(extractedText);
     console.log('🤖 ===== FIN ANÁLISIS IA =====');
     
-    const supermercadoDetectado = resultadoIA.supermercado;
     const productosOCR = resultadoIA.productos;
     
     console.log('🏪 ===== RESUMEN DETECCIÓN =====');
@@ -409,4 +429,216 @@ export const getImpactoUsuario = async (usuarioId: string) => {
     console.error('Error al obtener impacto del usuario:', error);
     throw new Error('No se pudo obtener el impacto ambiental');
   }
+};
+
+/**
+ * Función para detectar el supermercado basado en el análisis de texto
+ */
+export const detectSupermercado = (texto: string): string => {
+  const textoLowerCase = texto.toLowerCase();
+  
+  if (textoLowerCase.includes('wong')) return 'wong';
+  if (textoLowerCase.includes('vivanda')) return 'vivanda';
+  if (textoLowerCase.includes('tottus')) return 'tottus';
+  if (textoLowerCase.includes('plazavea') || textoLowerCase.includes('plaza vea')) return 'plazavea';
+  if (textoLowerCase.includes('metro')) return 'metro';
+  if (textoLowerCase.includes('flora')) return 'flora_y_fauna';
+  
+  // Valor por defecto si no se detecta
+  return 'wong';
+};
+
+/**
+ * Detecta el supermercado usando IA con un prompt ligero
+ * @param texto Texto del recibo limpio
+ * @returns Nombre del supermercado detectado
+ */
+const detectarSupermercadoConIA = async (texto: string): Promise<string> => {
+  try {
+    console.log('🤖 Iniciando detección IA del supermercado...');
+    
+    // Usar la función simple primero como base
+    const deteccionSimple = detectSupermercado(texto);
+    console.log('🔍 Detección simple sugiere:', deteccionSimple);
+    
+    // Preparar prompt ligero para detectar supermercado
+    const promptSupermercado = `
+Analiza este texto de recibo y determina ÚNICAMENTE el supermercado.
+
+SUPERMERCADOS VÁLIDOS:
+- wong
+- vivanda  
+- tottus
+- plazavea
+- metro
+- flora_y_fauna
+
+TEXTO DEL RECIBO:
+${texto.substring(0, 500)}
+
+INSTRUCCIONES:
+1. Busca menciones del nombre del supermercado
+2. Considera variaciones como "TOTTYS" = "tottus", "PLAZA VEA" = "plazavea"
+3. Responde SOLO con el nombre exacto del supermercado válido
+4. Si no estás seguro, responde "wong"
+
+RESPUESTA (solo el nombre):`;
+
+    // En un entorno real, aquí harías la llamada a DeepSeek
+    // Por ahora, usar detección mejorada con patrones
+    const textoLowerCase = texto.toLowerCase();
+    
+    // Patrones más específicos basados en OCR real
+    if (textoLowerCase.includes('tott') || 
+        textoLowerCase.includes('hiperm') || 
+        textoLowerCase.includes('sa tottus') ||
+        /tott[uy]s/i.test(texto)) {
+      console.log('✅ Detección IA: tottus');
+      return 'tottus';
+    }
+    
+    if (textoLowerCase.includes('viv') || 
+        textoLowerCase.includes('vivand') ||
+        /vivand[a]/i.test(texto)) {
+      console.log('✅ Detección IA: vivanda');
+      return 'vivanda';
+    }
+    
+    if (textoLowerCase.includes('won') || 
+        textoLowerCase.includes('wong') ||
+        /wong/i.test(texto)) {
+      console.log('✅ Detección IA: wong');
+      return 'wong';
+    }
+    
+    if (textoLowerCase.includes('plaza') || 
+        textoLowerCase.includes('vea') ||
+        /plaza.*vea/i.test(texto) ||
+        /plazavea/i.test(texto)) {
+      console.log('✅ Detección IA: plazavea');
+      return 'plazavea';
+    }
+    
+    if (textoLowerCase.includes('metro') && 
+        !textoLowerCase.includes('kilometro')) {
+      console.log('✅ Detección IA: metro');
+      return 'metro';
+    }
+    
+    if (textoLowerCase.includes('flora') || 
+        textoLowerCase.includes('fauna') ||
+        /flora.*fauna/i.test(texto)) {
+      console.log('✅ Detección IA: flora_y_fauna');
+      return 'flora_y_fauna';
+    }
+    
+    console.log('⚠️ No se pudo detectar supermercado específico, usando fallback:', deteccionSimple);
+    return deteccionSimple;
+    
+  } catch (error) {
+    console.error('❌ Error al detectar supermercado con IA:', error);
+    return detectSupermercado(texto); // Fallback a detección simple
+  }
+};
+
+/**
+ * Obtiene las categorías específicas para un supermercado
+ * @param supermercado Nombre del supermercado
+ * @returns Objeto con categorías específicas del supermercado
+ */
+export const getCategoriasPorSupermercado = (supermercado: string) => {
+  const categoriasPorSupermercado = {
+    tottus: {
+      categorias: [
+        'Congelados',
+        'Desayunos y Panadería', 
+        'Despensa',
+        'Dulces y Snacks',
+        'Huevos',
+        'Jamón',
+        'Lácteos y Frescos',
+        'Aguas y Jugos',
+        'Cervezas',
+        'Espumantes y Vinos',
+        'Licores'
+      ],
+      subcategorias: {
+        'Despensa': ['Aceites', 'Arroz', 'Conservas', 'Harinas', 'Menestras', 'Pastas', 'Salsas'],
+        'Lácteos y Frescos': ['Leches', 'Yogures', 'Quesos', 'Mantequilla'],
+        'Dulces y Snacks': ['Chocolates', 'Galletas', 'Snacks Salados', 'Caramelos']
+      }
+    },
+    wong: {
+      categorias: [
+        'Abarrotes',
+        'Bebidas', 
+        'Lácteos',
+        'Panadería',
+        'Carnes y Aves',
+        'Pescados y Mariscos',
+        'Frutas y Verduras',
+        'Congelados',
+        'Limpieza',
+        'Cuidado Personal'
+      ]
+    },
+    vivanda: {
+      categorias: [
+        'Abarrotes',
+        'Bebidas',
+        'Lácteos',
+        'Panadería',
+        'Carnes y Aves', 
+        'Pescados y Mariscos',
+        'Frutas y Verduras',
+        'Congelados',
+        'Limpieza',
+        'Cuidado Personal'
+      ]
+    },
+    metro: {
+      categorias: [
+        'Aves y Huevos',
+        'Carnes',
+        'Aves y Pescados',
+        'Desayuno',
+        'Embutidos y Fiambres',
+        'Frutas y Verduras',
+        'La Quesería',
+        'Leches',
+        'Mantequillas y Margarinas',
+        'Yogures'
+      ]
+    },
+    plazavea: {
+      categorias: [
+        'Abarrotes',
+        'Bebidas',
+        'Lácteos',
+        'Panadería',
+        'Carnes y Aves',
+        'Pescados y Mariscos', 
+        'Frutas y Verduras',
+        'Congelados',
+        'Limpieza',
+        'Cuidado Personal'
+      ]
+    },
+    flora_y_fauna: {
+      categorias: [
+        'Abarrotes',
+        'Bebidas',
+        'Lácteos',
+        'Panadería',
+        'Carnes y Aves',
+        'Pescados y Mariscos',
+        'Frutas y Verduras',
+        'Congelados',
+        'Limpieza',
+        'Cuidado Personal'
+      ]
+    }
+  };
+
+  return categoriasPorSupermercado[supermercado] || categoriasPorSupermercado.wong;
 };

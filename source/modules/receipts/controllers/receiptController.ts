@@ -1,5 +1,23 @@
 import type { Request, Response } from 'express';
 import * as receiptService from '../services/receiptService.js';
+import { buscarProductoEnQdrant } from '../services/qdrantService.js';
+
+/**
+ * Función para detectar el supermercado basado en el nombre del archivo o datos
+ */
+const detectSupermercado = (filename: string): string => {
+  const nombreArchivo = filename.toLowerCase();
+  
+  if (nombreArchivo.includes('wong')) return 'wong';
+  if (nombreArchivo.includes('vivanda')) return 'vivanda';
+  if (nombreArchivo.includes('tottus')) return 'tottus';
+  if (nombreArchivo.includes('plazavea') || nombreArchivo.includes('plaza')) return 'plazavea';
+  if (nombreArchivo.includes('metro')) return 'metro';
+  if (nombreArchivo.includes('flora')) return 'flora_y_fauna';
+  
+  // Valor por defecto
+  return 'wong';
+};
 
 /**
  * Controlador para la página de inicio/dashboard
@@ -36,23 +54,57 @@ export const uploadReceipt = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const usuarioId = req.user.id;
+    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
     
     console.log('🔄 Iniciando procesamiento de recibo...');
     console.log('📄 Archivo:', receiptFile.originalname, 'Tamaño:', receiptFile.size);
     
-    // NUEVO: Procesar imagen y obtener productos + texto OCR
+    // Procesar imagen con OCR y obtener productos detectados
     const { productos, texto } = await receiptService.analyzeReceiptImage(receiptFile.buffer);
 
-    console.log('✅ Análisis completado:');
-    console.log('📦 Productos detectados:', productos.length);
-    console.log('🔍 Productos encontrados en Qdrant:', productos.filter(p => p.co2e_estimado > 0).length);
+    console.log('📦 Productos detectados desde OCR:', productos.length);
+    
+    // Detectar supermercado desde el texto extraído del OCR
+    const supermercadoDetectado = receiptService.detectSupermercado(texto);
+    console.log('🏪 Supermercado detectado:', supermercadoDetectado);
 
-    const impactoCO2 = productos.reduce((total, producto) => {
+    // Enriquecer productos con datos de Qdrant
+    const productosEnriquecidos = await Promise.all(
+      productos.map(async (producto) => {
+        console.log(`🔍 Buscando en Qdrant: "${producto.nombre_detectado}"`);
+        
+        const datosQdrant = await buscarProductoEnQdrant(
+          producto.nombre_detectado,
+          supermercadoDetectado
+        );
+
+        if (datosQdrant) {
+          console.log(`✅ Datos encontrados en Qdrant para "${producto.nombre_detectado}":`, datosQdrant);
+          return {
+            ...producto,
+            co2e_estimado: datosQdrant.co2e_estimado,
+            categoria: datosQdrant.categoria,
+            huella_categoria: datosQdrant.huella_categoria,
+            encontrado_en_qdrant: true
+          };
+        } else {
+          console.log(`❌ No se encontraron datos en Qdrant para "${producto.nombre_detectado}"`);
+          return {
+            ...producto,
+            co2e_estimado: 0.5, // Valor por defecto
+            categoria: 'Sin categoría',
+            huella_categoria: 0,
+            encontrado_en_qdrant: false
+          };
+        }
+      })
+    );
+
+    const impactoCO2 = productosEnriquecidos.reduce((total, producto) => {
       return total + (producto.co2e_estimado || 0);
     }, 0);
 
-    const co2ePromedio = impactoCO2 / (productos.length || 1);
+    const co2ePromedio = impactoCO2 / (productosEnriquecidos.length || 1);
     const esReciboVerde = co2ePromedio < 0.5;
     
     console.log('🌱 Evaluación del recibo:');
@@ -60,37 +112,40 @@ export const uploadReceipt = async (req: Request, res: Response): Promise<void> 
     console.log('📊 CO2 promedio por producto:', co2ePromedio.toFixed(2), 'kg');
     console.log('♻️ Es recibo verde:', esReciboVerde ? 'SÍ' : 'NO');
 
-    const alternativasSugeridas = await receiptService.getAlternativasSostenibles(productos);
+    // Obtener alternativas sostenibles
+    const alternativasSugeridas = await receiptService.getAlternativasSostenibles(productosEnriquecidos);
 
+    // Guardar recibo en la base de datos
     const reciboGuardado = await receiptService.saveReceipt(
       usuarioId,
-      'upload',
-      texto, // ✅ Texto real del OCR
-      productos
+      supermercadoDetectado,
+      texto,
+      productosEnriquecidos
     );
 
     console.log('💾 Recibo guardado con ID:', reciboGuardado.id);
 
-    // Formatear productos para respuesta más limpia
-    const productosFormateados = productos.map(producto => ({
+    // Formatear productos para respuesta
+    const productosFormateados = productosEnriquecidos.map(producto => ({
       nombre: producto.nombre_detectado,
       cantidad: producto.cantidad || 1,
       peso_kg: parseFloat((producto.peso_estimado_kg || 0).toFixed(2)),
       co2_estimado: parseFloat((producto.co2e_estimado || 0).toFixed(2)),
-      nivel_impacto: producto.impacto,
-      es_eco_amigable: producto.eco_amigable || false
+      categoria: producto.categoria,
+      encontrado_en_qdrant: producto.encontrado_en_qdrant || false
     }));
 
     // Calcular estadísticas del recibo
-    const totalProductos = productos.length;
-    const productosEcoAmigables = productos.filter(p => p.eco_amigable).length;
-    const porcentajeEco = totalProductos > 0 ? Math.round((productosEcoAmigables / totalProductos) * 100) : 0;
+    const totalProductos = productosEnriquecidos.length;
+    const productosConDatos = productosEnriquecidos.filter(p => p.encontrado_en_qdrant).length;
+    const porcentajeCobertura = totalProductos > 0 ? Math.round((productosConDatos / totalProductos) * 100) : 0;
 
     res.status(201).json({
       success: true,
       message: 'Recibo analizado exitosamente',
       data: {
         recibo_id: reciboGuardado.id,
+        supermercado: supermercadoDetectado,
         archivo: {
           nombre: receiptFile.originalname,
           tamaño_kb: Math.round(receiptFile.size / 1024),
@@ -98,11 +153,11 @@ export const uploadReceipt = async (req: Request, res: Response): Promise<void> 
         },
         analisis: {
           total_productos: totalProductos,
+          productos_encontrados_qdrant: productosConDatos,
+          porcentaje_cobertura: porcentajeCobertura,
           impacto_co2_total: parseFloat(impactoCO2.toFixed(2)),
           promedio_co2_por_producto: parseFloat(co2ePromedio.toFixed(2)),
           es_recibo_verde: esReciboVerde,
-          productos_eco_amigables: productosEcoAmigables,
-          porcentaje_eco: porcentajeEco,
           puntos_verdes_obtenidos: esReciboVerde ? 10 : 0
         },
         productos: productosFormateados,
