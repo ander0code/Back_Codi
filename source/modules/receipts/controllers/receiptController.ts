@@ -24,8 +24,13 @@ const detectSupermercado = (filename: string): string => {
  */
 export const getDashboard = async (req: Request, res: Response): Promise<void> => {
   try {
-    // En un entorno real, obtendríamos el ID del usuario desde el token
-    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
+    // Obtener el ID del usuario desde el token JWT
+    const usuarioId = req.user?.id;
+    
+    if (!usuarioId) {
+      res.status(401).json({ error: 'Usuario no autenticado' });
+      return;
+    }
     
     // Obtener estadísticas del usuario
     const impactoUsuario = await receiptService.getImpactoUsuario(usuarioId);
@@ -52,11 +57,16 @@ export const uploadReceipt = async (req: Request, res: Response): Promise<void> 
     if (!receiptFile) {
       res.status(400).json({ error: 'No se ha proporcionado ningún archivo' });
       return;
+    }    // Obtener el ID del usuario desde el token JWT autenticado
+    const usuarioId = req.user?.id;
+    
+    if (!usuarioId) {
+      res.status(401).json({ error: 'Usuario no autenticado' });
+      return;
     }
-
-    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
     
     console.log('🔄 Iniciando procesamiento de recibo...');
+    console.log('👤 Usuario autenticado:', usuarioId);
     console.log('📄 Archivo:', receiptFile.originalname, 'Tamaño:', receiptFile.size);
     
     // Procesar imagen con OCR y obtener productos detectados
@@ -183,8 +193,13 @@ export const uploadReceipt = async (req: Request, res: Response): Promise<void> 
  */
 export const getImpact = async (req: Request, res: Response): Promise<void> => {
   try {
-    // En un entorno real, obtendríamos el ID del usuario desde el token
-    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
+    // Obtener el ID del usuario desde el token JWT
+    const usuarioId = req.user?.id;
+    
+    if (!usuarioId) {
+      res.status(401).json({ error: 'Usuario no autenticado' });
+      return;
+    }
     
     // Obtener todos los recibos del usuario
     const recibos = await receiptService.getRecibosByUsuarioId(usuarioId);
@@ -263,8 +278,13 @@ export const getImpact = async (req: Request, res: Response): Promise<void> => {
  */
 export const getHistory = async (req: Request, res: Response): Promise<void> => {
   try {
-    // En un entorno real, obtendríamos el ID del usuario desde el token
-    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
+    // Obtener el ID del usuario desde el token JWT
+    const usuarioId = req.user?.id;
+    
+    if (!usuarioId) {
+      res.status(401).json({ error: 'Usuario no autenticado' });
+      return;
+    }
     
     // Obtener recibos del usuario
     const recibos = await receiptService.getRecibosByUsuarioId(usuarioId);
@@ -323,7 +343,13 @@ export const getReceiptDetail = async (req: Request, res: Response): Promise<voi
  */
 export const saveReceipt = async (req: Request, res: Response): Promise<void> => {
   try {
-    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
+    const usuarioId = req.user?.id;
+    
+    if (!usuarioId) {
+      res.status(401).json({ error: 'Usuario no autenticado' });
+      return;
+    }
+    
     const { establecimiento, fecha, monto_total, co2_generado, productos } = req.body;
     
     const reciboGuardado = await receiptService.saveReceipt(
@@ -348,7 +374,13 @@ export const saveReceipt = async (req: Request, res: Response): Promise<void> =>
  */
 export const getAllReceipts = async (req: Request, res: Response): Promise<void> => {
   try {
-    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
+    const usuarioId = req.user?.id;
+    
+    if (!usuarioId) {
+      res.status(401).json({ error: 'Usuario no autenticado' });
+      return;
+    }
+    
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     
@@ -373,7 +405,13 @@ export const getAllReceipts = async (req: Request, res: Response): Promise<void>
  */
 export const getLatestReceipt = async (req: Request, res: Response): Promise<void> => {
   try {
-    const usuarioId = req.headers['x-user-id'] as string || '00000000-0000-0000-0000-000000000000';
+    const usuarioId = req.user?.id;
+    
+    if (!usuarioId) {
+      res.status(401).json({ error: 'Usuario no autenticado' });
+      return;
+    }
+    
     const recibos = await receiptService.getRecibosByUsuarioId(usuarioId);
     
     if (recibos.length === 0) {

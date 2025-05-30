@@ -15,7 +15,7 @@ const SUPERMERCADO_TO_COLLECTION: Record<string, string> = {
   'flora y fauna': 'flora_y_fauna',
   'flora & fauna': 'flora_y_fauna',
   'flora_y_fauna': 'flora_y_fauna'
-};
+};    
 
 
 const embeddings = new OpenAIEmbeddings({
@@ -65,23 +65,50 @@ export const buscarProductoEnQdrant = async (
     if (searchResult.length === 0) {
       console.log(`❌ No se encontraron resultados para: "${nombreProducto}"`);
       return null;
-    }
-
-    // Log de todos los resultados para debugging
+    }    // Log de todos los resultados con análisis detallado del payload
     searchResult.forEach((result, index) => {
       console.log(`📍 Resultado ${index + 1}:`);
       console.log(`   - Score: ${result.score}`);
-      console.log(`   - Payload:`, result.payload);
+      console.log(`   - Payload completo:`, JSON.stringify(result.payload, null, 2));
+      console.log(`   - Campos disponibles:`, Object.keys(result.payload || {}));
     });
 
     const mejorResultado = searchResult[0];
     const payload = mejorResultado.payload as any;
 
+    console.log(`🔍 ===== ANÁLISIS DETALLADO DEL PAYLOAD =====`);
+    console.log(`🔍 Payload raw:`, JSON.stringify(payload, null, 2));
+    console.log(`🔍 Campo 'categoria_principal':`, payload.categoria_principal);
+    console.log(`🔍 Campo 'categoria':`, payload.categoria);
+    console.log(`🔍 Campo 'category':`, payload.category);
+    console.log(`🔍 Campo 'tipo':`, payload.tipo);
+    console.log(`🔍 ===== FIN ANÁLISIS PAYLOAD =====`);
+
+    // Intentar múltiples campos posibles para cada dato
     const resultado = {
-      co2e_estimado: payload.co2_estimado,
-      huella_categoria: payload.huella_categoria,
-      categoria: payload.categoria,
+      co2e_estimado: payload.co2_estimado || payload.co2e_estimado || payload.huella_co2 || 0,
+      huella_categoria: payload.huella_categoria || payload.co2_categoria || payload.co2_estimado || payload.co2e_estimado || 0,
+      categoria: payload.categoria_principal || payload.categoria || payload.category || payload.tipo || 'Sin categoría',
     };
+
+    // Validar que la categoría no esté vacía
+    if (!resultado.categoria || resultado.categoria.trim() === '' || resultado.categoria === 'Sin categoría') {
+      console.log(`⚠️ Categoría no válida detectada, intentando campos alternativos...`);
+      
+      // Intentar campos alternativos
+      const categoriasAlternativas = [
+        payload.tipo_producto,
+        payload.seccion,
+        payload.departamento,
+        payload.grupo,
+        payload.linea
+      ].filter(Boolean);
+      
+      if (categoriasAlternativas.length > 0) {
+        resultado.categoria = categoriasAlternativas[0];
+        console.log(`🔄 Categoría alternativa encontrada: "${resultado.categoria}"`);
+      }
+    }
 
     console.log(`✅ Mejor resultado seleccionado:`, resultado);
     console.log(`✅ ===== FIN BÚSQUEDA QDRANT =====`);

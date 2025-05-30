@@ -229,6 +229,20 @@ export const saveReceipt = async (
   productos: ProductoRecibo[]
 ): Promise<Recibo> => {
   try {
+    console.log(`💾 Guardando recibo para usuario: ${usuarioId}`);
+    
+    // Verificar que el usuario existe
+    const usuario = await prisma.usuarios.findUnique({
+      where: { id: usuarioId }
+    });
+
+    if (!usuario) {
+      console.error(`❌ Usuario con ID ${usuarioId} no encontrado`);
+      throw new Error(`Usuario con ID ${usuarioId} no encontrado`);
+    }
+
+    console.log(`✅ Usuario verificado: ${usuario.nombre} (${usuario.correo})`);
+
     // Calcular CO2e total
     const co2eTotal = productos.reduce((total, producto) => {
       return total + (producto.co2e_estimado || 0);
@@ -641,4 +655,41 @@ export const getCategoriasPorSupermercado = (supermercado: string) => {
   };
 
   return categoriasPorSupermercado[supermercado] || categoriasPorSupermercado.wong;
+};
+
+/**
+ * Valida la categoría obtenida de Qdrant y la mapea si es necesaria
+ * @param categoria Categoría obtenida de Qdrant
+ * @param supermercado Supermercado detectado
+ * @returns Categoría validada y mapeada
+ */
+const validarYMapearCategoriaQdrant = (categoria: string, supermercado: string): string => {
+  console.log('🔍 ===== VALIDACIÓN CATEGORÍA QDRANT =====');
+  console.log(`📍 Categoría original: "${categoria}"`);
+  console.log(`🏪 Supermercado: "${supermercado}"`);
+  
+  // Si la categoría es 'Sin categoría' o vacía, usar mapeo
+  if (!categoria || categoria.trim() === '' || categoria === 'Sin categoría') {
+    console.log('❌ Categoría no válida, usando fallback');
+    const { categoria: categoriaFallback } = mapearCategoriaASupermercado('Abarrotes', supermercado);
+    console.log(`🔄 Categoría fallback: "${categoriaFallback}"`);
+    return categoriaFallback;
+  }
+  
+  // Verificar si la categoría existe en las categorías válidas del supermercado
+  const categoriasSupermercado = getCategoriasPorSupermercado(supermercado);
+  const categoriaExiste = categoriasSupermercado.categorias.includes(categoria);
+  
+  if (categoriaExiste) {
+    console.log(`✅ Categoría válida: "${categoria}"`);
+    return categoria;
+  }
+  
+  // Si no existe, intentar mapear
+  console.log(`⚠️ Categoría no existe en supermercado, intentando mapeo...`);
+  const { categoria: categoriaMapeada } = mapearCategoriaASupermercado(categoria, supermercado);
+  console.log(`🔄 Categoría mapeada: "${categoriaMapeada}"`);
+  
+  console.log('✅ ===== FIN VALIDACIÓN CATEGORÍA QDRANT =====');
+  return categoriaMapeada;
 };

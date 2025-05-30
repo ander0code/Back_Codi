@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import type { Router as IRouter } from 'express';
 import authenticateJWT from '../../../middleware/authMiddleware.js';
+import * as usersController from '../controllers/usersController.js';
 
 const router: IRouter = Router();
 
@@ -82,9 +83,7 @@ router.get('/profile', (req: Request, res: Response) => {
  *       500:
  *         description: Error del servidor
  */
-router.get('/carbon-stats', (req: Request, res: Response) => {
-  res.status(501).json({ message: 'Controller not implemented yet' });
-});
+router.get('/carbon-stats', usersController.getCarbonStats);
 
 /**
  * @swagger
@@ -111,9 +110,7 @@ router.get('/carbon-stats', (req: Request, res: Response) => {
  *       500:
  *         description: Error del servidor
  */
-router.get('/green-receipts', (req: Request, res: Response) => {
-  res.status(501).json({ message: 'Controller not implemented yet' });
-});
+router.get('/green-receipts', usersController.getGreenReceipts);
 
 /**
  * @swagger
@@ -155,9 +152,7 @@ router.get('/green-receipts', (req: Request, res: Response) => {
  *       500:
  *         description: Error del servidor
  */
-router.get('/receipt-stats', (req: Request, res: Response) => {
-  res.status(501).json({ message: 'Controller not implemented yet' });
-});
+router.get('/receipt-stats', usersController.getReceiptStats);
 
 /**
  * @swagger
